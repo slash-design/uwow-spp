@@ -1,8 +1,8 @@
 <<<<<<< HEAD
 # VCR Legion Core 2.0
-VS 2017 x64
-boost 1.64
-openssl 1.0
+VS 2019 x64
+boost 1.72
+openssl 1.1.1
 
 cmake settings libeay32MDd.lib libeay32MD.lib  ssleay32MDd.lib ssleay32MD.lib
 
