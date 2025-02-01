@@ -1,6 +1,5 @@
-<<<<<<< HEAD
-# VCR Legion Core 2.0
-VS 2019 x64
+# EmberwingCore
+VS19/22 x64
 boost 1.72
 openssl 1.1.1
 
