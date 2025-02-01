@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2012 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the DestinyCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -52,7 +52,6 @@ void Addsc_dalaran_invasion();
 void AddSC_RandomEnchantsScript();
 void AddSC_Death_Announcer();
 void AddSC_WhoLoggedScripts();
-void AddSC_spp_info();
 void AddSC_Boss_Announcer();
 void AddSC_announce_login();
 void AddSC_dynamic_xp_rate();
@@ -1157,7 +1156,6 @@ void AddCustomScripts()
     AddSC_RandomEnchantsScript();
     AddSC_Death_Announcer();
     AddSC_WhoLoggedScripts();
-    AddSC_spp_info();
     AddSC_Boss_Announcer();
     AddSC_announce_login();
 	AddSC_dynamic_xp_rate();
