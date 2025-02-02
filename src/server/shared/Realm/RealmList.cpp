@@ -49,7 +49,7 @@ void RealmList::Initialize(boost::asio::io_service& ioService, uint32 updateInte
 {
     _updateInterval = updateInterval;
     _updateTimer = Trinity::make_unique<boost::asio::deadline_timer>(ioService);
-    _resolver = Trinity::make_unique<boost::asio::ip::tcp::resolver>(ioService);
+    _resolver = Trinity::make_unique<Trinity::Asio::Resolver>(ioService);
 
     LoadBuildInfo();
     // Get the content of the realmlist table in the database
@@ -63,21 +63,21 @@ void RealmList::Close()
 
 void RealmList::LoadBuildInfo()
 {
-	//                                                              0             1              2              3      4              5              6            7
-	if (QueryResult result = LoginDatabase.Query("SELECT majorVersion, minorVersion, bugfixVersion, hotfixVersion, build, win64AuthSeed, mac64AuthSeed, winAuthSeed FROM build_info ORDER BY build ASC"))
-	{
-		do
-		{
-			Field* fields = result->Fetch();
-			_builds.emplace_back();
-			RealmBuildInfo& build = _builds.back();
-			build.MajorVersion = fields[0].GetUInt32();
-			build.MinorVersion = fields[1].GetUInt32();
-			build.BugfixVersion = fields[2].GetUInt32();
-			std::string hotfixVersion = fields[3].GetString();
-			if (hotfixVersion.length() < build.HotfixVersion.size())
-				std::copy(hotfixVersion.begin(), hotfixVersion.end(), build.HotfixVersion.begin());
-			else
+    //                                                              0             1              2              3      4              5              6            7
+    if (QueryResult result = LoginDatabase.Query("SELECT majorVersion, minorVersion, bugfixVersion, hotfixVersion, build, win64AuthSeed, mac64AuthSeed, winAuthSeed FROM build_info ORDER BY build ASC"))
+    {
+        do
+        {
+            Field* fields = result->Fetch();
+            _builds.emplace_back();
+            RealmBuildInfo& build = _builds.back();
+            build.MajorVersion = fields[0].GetUInt32();
+            build.MinorVersion = fields[1].GetUInt32();
+            build.BugfixVersion = fields[2].GetUInt32();
+            std::string hotfixVersion = fields[3].GetString();
+            if (hotfixVersion.length() < build.HotfixVersion.size())
+                std::copy(hotfixVersion.begin(), hotfixVersion.end(), build.HotfixVersion.begin());
+            else
                 std::fill(hotfixVersion.begin(), hotfixVersion.end(), '\0');
 
             build.Build = fields[4].GetUInt32();
@@ -146,42 +146,33 @@ void RealmList::UpdateRealms(boost::system::error_code const& error)
         {
             try
             {
-                boost::asio::ip::tcp::resolver::iterator end;
-
                 Field* fields = result->Fetch();
                 uint32 realmId = fields[0].GetUInt32();
                 std::string name = fields[1].GetString();
-                boost::asio::ip::tcp::resolver::query externalAddressQuery(boost::asio::ip::tcp::v4(), fields[2].GetString(), "");
+                std::string externalAddressString = fields[2].GetString();
+                std::string localAddressString = fields[3].GetString();
+                std::string localSubmaskString = fields[4].GetString();
 
-                boost::system::error_code ec;
-                boost::asio::ip::tcp::resolver::iterator endPoint = _resolver->resolve(externalAddressQuery, ec);
-                if (endPoint == end || ec)
+                Optional<boost::asio::ip::tcp::endpoint> externalAddress = _resolver->Resolve(boost::asio::ip::tcp::v4(), externalAddressString, "");
+                if (!externalAddress)
                 {
                     TC_LOG_ERROR(LOG_FILTER_REALMLIST, "Could not resolve address %s for realm \"%s\" id %u", fields[2].GetString().c_str(), name.c_str(), realmId);
                     continue;
                 }
 
-                boost::asio::ip::address externalAddress = endPoint->endpoint().address();
-
-                boost::asio::ip::tcp::resolver::query localAddressQuery(boost::asio::ip::tcp::v4(), fields[3].GetString(), "");
-                endPoint = _resolver->resolve(localAddressQuery, ec);
-                if (endPoint == end || ec)
+                Optional<boost::asio::ip::tcp::endpoint> localAddress = _resolver->Resolve(boost::asio::ip::tcp::v4(), localAddressString, "");
+                if (!localAddress)
                 {
                     TC_LOG_ERROR(LOG_FILTER_REALMLIST, "Could not resolve localAddress %s for realm \"%s\" id %u", fields[3].GetString().c_str(), name.c_str(), realmId);
                     continue;
                 }
 
-                boost::asio::ip::address localAddress = endPoint->endpoint().address();
-
-                boost::asio::ip::tcp::resolver::query localSubmaskQuery(boost::asio::ip::tcp::v4(), fields[4].GetString(), "");
-                endPoint = _resolver->resolve(localSubmaskQuery, ec);
-                if (endPoint == end || ec)
+                Optional<boost::asio::ip::tcp::endpoint> localSubmask = _resolver->Resolve(boost::asio::ip::tcp::v4(), localSubmaskString, "");
+                if (!localSubmask)
                 {
                     TC_LOG_ERROR(LOG_FILTER_REALMLIST, "Could not resolve localSubnetMask %s for realm \"%s\" id %u", fields[4].GetString().c_str(), name.c_str(), realmId);
                     continue;
                 }
-
-                boost::asio::ip::address localSubmask = endPoint->endpoint().address();
 
                 uint16 port = fields[5].GetUInt16();
                 uint8 icon = fields[6].GetUInt8();
@@ -199,17 +190,15 @@ void RealmList::UpdateRealms(boost::system::error_code const& error)
 
                 Battlenet::RealmHandle id{ region, battlegroup, realmId };
 
-                _realmIPs[realmId] = externalAddress;
-
-                UpdateRealm(id, build, name, externalAddress, localAddress, localSubmask, port, icon, flag,
+                UpdateRealm(id, build, name, externalAddress->address(), localAddress->address(), localSubmask->address(), port, icon, flag,
                     timezone, (allowedSecurityLevel <= SEC_ADMINISTRATOR ? AccountTypes(allowedSecurityLevel) : SEC_ADMINISTRATOR), pop);
 
                 _subRegions.insert(Battlenet::RealmHandle{ region, battlegroup, 0 }.GetAddressString());
 
                 if (!existingRealms.count(id))
-                    TC_LOG_INFO(LOG_FILTER_REALMLIST, "Added realm \"%s\" at %s:%u.", name.c_str(), externalAddress.to_string().c_str(), port);
+                    TC_LOG_INFO(LOG_FILTER_REALMLIST, "Added realm \"%s\" at %s:%u.", name.c_str(), externalAddressString.c_str(), port);
                 else
-                    TC_LOG_DEBUG(LOG_FILTER_REALMLIST, "Updating realm \"%s\" at %s:%u.", name.c_str(), externalAddress.to_string().c_str(), port);
+                    TC_LOG_DEBUG(LOG_FILTER_REALMLIST, "Updating realm \"%s\" at %s:%u.", name.c_str(), externalAddressString.c_str(), port);
 
                 existingRealms.erase(id);
             }
@@ -218,11 +207,10 @@ void RealmList::UpdateRealms(boost::system::error_code const& error)
                 TC_LOG_ERROR(LOG_FILTER_REALMLIST, "Realmlist::UpdateRealms has thrown an exception: %s", ex.what());
                 ABORT();
             }
-        }
-        while (result->NextRow());
+        } while (result->NextRow());
     }
 
-    for (auto & existingRealm : existingRealms)
+    for (auto& existingRealm : existingRealms)
         TC_LOG_INFO(LOG_FILTER_REALMLIST, "Removed realm \"%s\".", existingRealm.second.c_str());
 
     if (_updateInterval)
@@ -243,7 +231,7 @@ Realm const* RealmList::GetRealm(Battlenet::RealmHandle const& id) const
 
 RealmBuildInfo const* RealmList::GetBuildInfo(uint32 build) const
 {
-    for (const auto & clientBuild : _builds)
+    for (const auto& clientBuild : _builds)
         if (clientBuild.Build == build)
             return &clientBuild;
 
@@ -252,11 +240,11 @@ RealmBuildInfo const* RealmList::GetBuildInfo(uint32 build) const
 
 uint32 RealmList::GetMinorMajorBugfixVersionForBuild(uint32 build) const
 {
-	auto buildInfo = std::lower_bound(_builds.begin(), _builds.end(), build, [](RealmBuildInfo const& buildInfo, uint32 value)
-	{
-		return buildInfo.Build < value;
-	});
-	return buildInfo != _builds.end() ? (buildInfo->MajorVersion * 10000 + buildInfo->MinorVersion * 100 + buildInfo->BugfixVersion) : 0;
+    auto buildInfo = std::lower_bound(_builds.begin(), _builds.end(), build, [](RealmBuildInfo const& buildInfo, uint32 value)
+        {
+            return buildInfo.Build < value;
+        });
+    return buildInfo != _builds.end() ? (buildInfo->MajorVersion * 10000 + buildInfo->MinorVersion * 100 + buildInfo->BugfixVersion) : 0;
 }
 
 void RealmList::WriteSubRegions(bgs::protocol::game_utilities::v1::GetAllValuesForAttributeResponse* response) const
@@ -431,9 +419,4 @@ uint32 RealmList::JoinRealm(uint32 realmAddress, uint32 /*build*/, boost::asio::
     }
 
     return ERROR_UTIL_SERVER_UNKNOWN_REALM;
-}
-
-boost::asio::ip::address RealmList::GetAddressForClient(uint32 RealmID)
-{
-    return _realmIPs[RealmID];
 }

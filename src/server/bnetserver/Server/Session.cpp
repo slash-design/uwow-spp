@@ -28,8 +28,7 @@
 
 #include <zlib.h>
 #include <memory>
-
-#pragma pack(push, 1)
+#include <Config.h>
 
 void Battlenet::Session::AccountInfo::LoadResult(PreparedQueryResult result)
 {

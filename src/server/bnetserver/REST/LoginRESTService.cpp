@@ -21,6 +21,7 @@
 #include "JSON/ProtobufJSON.h"
 #include "IpNetwork.h"
 #include "Realm.h"
+#include "Resolver.h"
 #include "SessionManager.h"
 #include "SHA1.h"
 #include "SHA256.h"
@@ -29,6 +30,7 @@
 #include "httpget.h"
 #include "httppost.h"
 #include "soapH.h"
+#include "Session.h"
 
 int ns1__executeCommand(soap*, char*, char**) { return SOAP_OK; }
 
@@ -54,31 +56,27 @@ bool LoginRESTService::Start(boost::asio::io_service& ioService)
         _port = 8081;
     }
 
-    boost::system::error_code ec;
-    boost::asio::ip::tcp::resolver resolver(ioService);
-    boost::asio::ip::tcp::resolver::iterator end;
+    Trinity::Asio::Resolver resolver(ioService);
 
     std::string configuredAddress = sConfigMgr->GetStringDefault("LoginREST.ExternalAddress", "127.0.0.1");
-    boost::asio::ip::tcp::resolver::query externalAddressQuery(boost::asio::ip::tcp::v4(), configuredAddress, std::to_string(_port));
-    boost::asio::ip::tcp::resolver::iterator endPoint = resolver.resolve(externalAddressQuery, ec);
-    if (endPoint == end || ec)
+    Optional<boost::asio::ip::tcp::endpoint> externalAddress = resolver.Resolve(boost::asio::ip::tcp::v4(), configuredAddress, std::to_string(_port));
+    if (!externalAddress)
     {
         TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Could not resolve LoginREST.ExternalAddress %s", configuredAddress.c_str());
         return false;
     }
 
-    _externalAddress = endPoint->endpoint();
+    _externalAddress = *externalAddress;
 
     configuredAddress = sConfigMgr->GetStringDefault("LoginREST.LocalAddress", "127.0.0.1");
-    boost::asio::ip::tcp::resolver::query localAddressQuery(boost::asio::ip::tcp::v4(), configuredAddress, std::to_string(_port));
-    endPoint = resolver.resolve(localAddressQuery, ec);
-    if (endPoint == end || ec)
+    Optional<boost::asio::ip::tcp::endpoint> localAddress = resolver.Resolve(boost::asio::ip::tcp::v4(), configuredAddress, std::to_string(_port));
+    if (!localAddress)
     {
         TC_LOG_ERROR(LOG_FILTER_BATTLENET, "REST Could not resolve LoginREST.LocalAddress %s", configuredAddress.c_str());
         return false;
     }
 
-    _localAddress = endPoint->endpoint();
+    _localAddress = *localAddress;
     _localNetmask = Trinity::Net::GetDefaultNetmaskV4(_localAddress.address().to_v4());
 
     // set up form inputs
@@ -176,9 +174,9 @@ void LoginRESTService::Run()
         TC_LOG_DEBUG(LOG_FILTER_BATTLENET, "REST Accepted connection from IP=%s", address.to_string().c_str());
 
         std::thread([soapClient]
-        {
-            soap_serve(soapClient.get());
-        }).detach();
+            {
+                soap_serve(soapClient.get());
+            }).detach();
     }
 
     // and release the context handle here - soap does not own it so it should not free it on exit
@@ -218,7 +216,7 @@ int32 LoginRESTService::HandlePost(soap* soapClient)
         return 404;
     }
 
-    char *buf;
+    char* buf;
     size_t len;
     soap_http_body(soapClient, &buf, &len);
 
@@ -256,7 +254,7 @@ int32 LoginRESTService::HandlePost(soap* soapClient)
 
     Utf8ToUpperOnlyLatin(login);
     Utf8ToUpperOnlyLatin(password);
-    
+
     PreparedStatement* stmt = LoginDatabase.GetPreparedStatement(LOGIN_SEL_BNET_ACCOUNT_EMAIL_BY_ACC);
 
     if (sConfigMgr->GetBoolDefault("Login.with.account", false))
@@ -283,7 +281,7 @@ int32 LoginRESTService::HandlePost(soap* soapClient)
 
     stmt->setString(0, login);
     stmt->setString(1, CalculateShaPassHash(login, std::move(password)));
-    
+
     if (PreparedQueryResult result = LoginDatabase.Query(stmt))
     {
         std::unique_ptr<Battlenet::Session::AccountInfo> accountInfo = Trinity::make_unique<Battlenet::Session::AccountInfo>();
