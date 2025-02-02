@@ -1,3 +1,5 @@
+include(CheckCXXSourceCompiles)
+
 # Set build-directive (used in core to tell which buildtype we used)
 add_definitions(-D_BUILD_DIRECTIVE='"${CMAKE_BUILD_TYPE}"')
 
@@ -19,3 +21,15 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wno-narrowing -Wno-deprecated-register")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG=1")
 
+  message(STATUS "Clang: Disallow undefined symbols")
+endif()
+
+# speedup PCH builds by forcing template instantiations during PCH generation
+set(CMAKE_REQUIRED_FLAGS "-fpch-instantiate-templates")
+check_cxx_source_compiles("int main() { return 0; }" CLANG_HAS_PCH_INSTANTIATE_TEMPLATES)
+unset(CMAKE_REQUIRED_FLAGS)
+if(CLANG_HAS_PCH_INSTANTIATE_TEMPLATES)
+  target_compile_options(trinity-compile-option-interface
+          INTERFACE
+          -fpch-instantiate-templates)
+endif()
